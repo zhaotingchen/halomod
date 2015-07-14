@@ -12,16 +12,14 @@ import sys
 import os
 import traceback
 import numpy as np
-from hod import hod
-from hod import tools
+from halomod import tools
 import ast
-from hod.fort.routines import hod_routines as hr
+from halomod.fort.routines import hod_routines as hr
 from argparse import ArgumentParser
 from argparse import RawDescriptionHelpFormatter
-
+from hmf._framework import get_model
 import cosmolopy as cp
 
-from multiprocessing import Pool, cpu_count
 __all__ = []
 __version__ = 0.1
 __date__ = "2014 - 01 - 21"
@@ -44,18 +42,18 @@ class CLIError(Exception):
 def main(argv=None):
     '''
     Populate a dark-matter simulation with galaxies based on a given HOD.
-    
+
     The script will take input files in a number of formats. Currently these
     include:
-        
+
         1. SubFind format: a fofcat file and a pos file.
         2. ASCII format: 4 columns: x,y,z,mass
-        
+
     If other formats are in demand, they will be implemented. Otherwise, first
     convert any required files to one of these formats.
-    
+
     To use the ASCII format, just pass a single filename. To use the SubFind
-    format, pass a filename to the --posfile argument as well (having passed 
+    format, pass a filename to the --posfile argument as well (having passed
     the fofcat file as the infile).
     '''
 
@@ -70,16 +68,16 @@ def main(argv=None):
     program_version_message = '%%(prog)s %s (%s)' % (program_version, program_build_date)
     program_shortdesc = __import__('__main__').__doc__.split("\n")[1]
     program_license = '''%s
-    
+
      Created by Steven Murray on 21-01-2014.
      Copyright 2014 organization_name. All rights reserved.
-    
+
      Licensed under the Apache License 2.0
      http://www.apache.org/licenses/LICENSE-2.0
-    
+
      Distributed on an "AS IS" basis without warranties
      or conditions of any kind, either express or implied.
-    
+
     USAGE
     ''' % (program_shortdesc)
 
@@ -88,96 +86,57 @@ def main(argv=None):
         parser = ArgumentParser(description=program_license, formatter_class=RawDescriptionHelpFormatter)
         parser.add_argument("-v", "--verbose", dest="verbose", action="count", help="set verbosity level [default: %(default)s]")
         parser.add_argument('-V', '--version', action='version', version=program_version_message)
-        parser.add_argument("infile", nargs="+", help="the main input halo catalogue(s). If SubFind format, this is the fofcat file.")
+        parser.add_argument("infile", help="the main input halo catalogue. If SubFind format, this is the fofcat file.")
         parser.add_argument("hodmod_dict", help="dictionary of HOD parameters")
 
-        parser.add_argument("--outfile", nargs="*", help="the output galaxy catalogue")
+        parser.add_argument("--outfile", help="the output galaxy catalogue")
 
-        parser.add_argument("--filetype", nargs="*", default=["ascii"], choices=["ascii", "subfind"], help="the type of input file(s). Must be len(1) or len(infile)")
-        parser.add_argument("--hodmod", default="zheng", help="the HOD model used")
+        parser.add_argument("--filetype",default="ascii", choices=["ascii", "subfind"], help="the type of input file")
+        parser.add_argument("--hodmod", default="Zehavi05", help="the HOD model used")
         parser.add_argument("--delta_h", default=200.0, type=float, help="the average halo overdensity")
         parser.add_argument("--profile", default="NFW", help="the halo profile to use")
         parser.add_argument("--cm-relation", default="zehavi", help="the Concentration-Mass relation")
         parser.add_argument("--no-truncate", action="store_true", help="don't truncate profile")
-        parser.add_argument("--omegam", nargs="*", default=[0.3], type=float, help="the matter density")
-        parser.add_argument("--redshift", nargs="*", default=[0.0], type=float, help="the redshift")
-        parser.add_argument("--nthreads", type=int, help="number of threads to use. Default auto.")
-        parser.add_argument("-m", "--particle-mass", default=1.0, type=float, help="particle mass in the simulation. For ascii, leave as 1.0 unless 4th column is number of particles.")
-        parser.add_argument("--delta-wrt", nargs="*", default=["mean"], choices=["mean", "crit"], help="what delta_h is with respect to")
+        parser.add_argument("--omegam", default=0.3, type=float, help="the matter density wrt critical")
+        parser.add_argument("--redshift", default=0.0, type=float, help="the redshift")
+        parser.add_argument("-L","--boxsize",type=float,help="box side length. If not given, estimated from particle positions")
+        parser.add_argument("-m", "--particle-mass", default=1.0, type=float, help="particle mass in the simulation. For ascii, leave as 1.0 unless mass column is number of particles.")
+        parser.add_argument("--delta-wrt", default="mean", choices=["mean", "crit"], help="what delta_h is with respect to")
+        parser.add_argument("--indices",type=int,nargs=4,help="columns of ascii file corresponding to (x,y,z,m)")
 
         # Process arguments
         args = parser.parse_args()
 
-        # # Check that filetype has the right number
-        if len(args.filetype) != 1 and len(args.filetype) != len(args.infile):
-            raise ValueError("filetype must be len(1) or len(infile)")
-
-        if len(args.filetype) == 1:
-            ftypes = len(args.infile) * args.filetype
-        else:
-            ftypes = args.filetype
-
-        # Check if outfile the right length
-        if args.outfile != None and len(args.outfile) != len(args.infile):
-            raise ValueError("outfile must be None or len(infile)")
 
         if args.outfile is None:
-            outfiles = [f + "_gal" for f in args.infile]
+            outfile = args.infile + "_gal"
         else:
-            outfiles = args.outfile
+            outfile = args.outfile
 
-        # Get posfiles if type is subfind.
-        posfiles = [f.replace("fofcat", "pos") if ftypes[i] == "subfind" else None for i, f in enumerate(args.infile)]
+        # Get posfile if type is subfind.
+        posfile = args.infile.replace("fofcat", "pos") if args.filetype == "subfind" else None
 
-
-        # auto-calculate the number of threads to use if not set.
-        if not args.nthreads:
-            nthreads = cpu_count()
-        else:
-            nthreads = args.nthreads
-        p = Pool(nthreads)
-
-
-        # Also check omegam and redshift (as they are dependent on simulation)
-        if len(args.redshift) != 1 and len(args.redshift) != len(args.infile):
-            raise ValueError("redshift must be len(1) or len(infile)")
-
-        if len(args.redshift) == 1:
-            redshifts = len(args.infile) * args.redshift
-        else:
-            redshifts = args.redshift
-
-        if len(args.omegam) != 1 and len(args.omegam) != len(args.infile):
-            raise ValueError("omegam must be len(1) or len(infile)")
-
-        if len(args.omegam) == 1:
-            omegams = len(args.infile) * args.omegam
-        else:
-            omegams = args.omegam
+        redshift = args.redshift
+        omegam = args.omegam
 
         delta_h = []
-        if len(args.delta_wrt) == 1:
-            delta_h = len(args.infile) * [args.delta_h]
-        elif len(args.delta_wrt) == len(args.infile):
-            delta_h = [args.delta_h if dw == "mean" else args.delta_h / cp.density.omega_M_z(args.redshift[i], omega_M_0=omegams[i],
-                                                          omega_lambda_0=1 - omegams[i],
-                                                          omega_k_0=0.0) for i, dw in enumerate(args.delta_wrt)]
-        else:
-            raise ValueError("length of delta_wrt must be 1 or len(infile)")
 
-        print delta_h
+        if args.delta_wrt =="mean":
+            delta_h = args.delta_h
+        else:
+            delta_h = args.delta_h / cp.density.omega_M_z(redshift, omega_M_0=omegam,
+                                                omega_lambda_0=1 - omegam,
+                                                omega_k_0=0.0)
 
         # Define the HOD model
-        hodparams = ast.literal_eval(args.hodmod_dict)
-        hodmod = hod.HOD(args.hodmod, **hodparams)
-
-
-        popfunc = _function_wrapper(populate, [ftypes, args, delta_h, posfiles, omegams,
-                                                redshifts, hodmod, outfiles])
-
-        flags = p.map(popfunc, range(len(args.infile)))
-
-        assert False not in flags
+        #hodparams = ast.literal_eval(args.hodmod_dict)
+        #hodmod = hod.HOD(args.hodmod, **hodparams)
+        hodmod = get_model(args.hodmod, "halomod.hod", **hodparams)
+        profile = get_model(args.profile,"halomod.profile",omegam=omegam,delta_halo=delta_h,
+                            cm_relation=args.cm_relation,z=redshift)
+        populate(args.filetype, args.infile, delta_h, posfile, omegam,
+                redshift, hodmod, outfile,args.particle_mass,args.profile,
+                args.cm_relation,args.indices,args.boxsize,args.no_truncate)
 
         return 0
     except KeyboardInterrupt:
@@ -196,21 +155,24 @@ def main(argv=None):
 #===============================================================================
 # FUNCTION CALLS
 #===============================================================================
-def populate(i, ftypes, args, delta_h, posfiles, omegams, redshifts, hodmod, outfiles):
-    if ftypes[i] == "subfind":
-        centres, masses = read_subfind(args.infile[i], posfiles[i], args.particle_mass)
+def populate(ftype, infile, delta_h, posfile, omegam, redshift, hodmod, outfile,
+             mp,profile,cm_relation,indices,boxsize = None,no_truncate=False):
+    if ftype == "subfind":
+        centres, masses = read_subfind(infile, posfile, mp)
     elif ftypes[i] == "ascii":
-        centres, masses = read_ascii(args.infile[i], args.particle_mass)
+        centres, masses = read_ascii(infile, mp,indices)
     else:
-        raise ValueError("ftypes had value " + ftypes[i] + " in it!")
+        raise ValueError("ftype was " + ftype)
 
-    boxsize = np.ceil(centres.max())  # best estimate we can get
+    if not boxsize:
+        boxsize = np.ceil(centres.max())  # best estimate we can get
+
     # Convert to physical co-ordinates
     centres /= (1 + redshifts[i])
 
-    pos = tools.populate(centres, masses, delta_h[i], omegams[i],
-                         redshifts[i], args.profile, args.cm_relation,
-                         hodmod, not args.no_truncate)
+    pos = tools.populate(centres, masses, delta_h, omegam,
+                         redshift, profile, cm_relation,
+                         hodmod, not no_truncate)
 
     pos *= (1 + redshifts[i])
 
@@ -219,31 +181,11 @@ def populate(i, ftypes, args, delta_h, posfiles, omegams, redshifts, hodmod, out
     pos[pos > boxsize] -= boxsize
 
     np.savetxt(outfiles[i], pos)
-    return True
 
-class _function_wrapper(object):
-    """
-    This is a hack to make the likelihood function pickleable when ``args``
-    are also included.
-
-    Taken from the emcee package.
-    """
-    def __init__(self, f, args):
-        self.f = f
-        self.args = args
-
-    def __call__(self, x):
-        try:
-            return self.f(x, *self.args)
-        except:
-            raise
-
-def read_ascii(filename, mp):
-    x = np.genfromtxt(filename)
-    masses = x[1:, 3] * mp
-
-    centres = x[1:, :3]
-
+def read_ascii(filename, mp,indices=[0,1,2,3]):
+    x = np.genfromtxt(filename)[indices]
+    masses = x[:, 3] * mp
+    centres = x[:, :3]
     return centres, masses
 
 def read_subfind(fofcat_file, pos_file, mp):
@@ -315,4 +257,3 @@ if __name__ == "__main__":
         statsfile.close()
         sys.exit(0)
     sys.exit(main())
-
