@@ -19,27 +19,19 @@ class CMRelation(Model):
 
     Parameters
     ----------
+    nu  : array
+        A vector of peak-heights, :math:`\delta_c^2/\sigma^2`.
+
+    z   : float, optional, default 0
+        The redshift
+
+    growth : type :class:`hmf.growth_factor.GrowthFactor`
+        A model to calculate the growth factor
+
     M   : array
-        A vector of halo masses [units M_sun/h]
+        masses
 
-    nu2  : array
-        A vector of peak-heights, :math:`\delta_c^2/\sigma^2` corresponding to ``M``
-
-    z   : float, optional
-        The redshift.
-
-    delta_halo : float, optional
-        The overdensity of the halo w.r.t. the mean density of the universe.
-
-    cosmo : :class:`cosmo.Cosmology` instance, optional
-        A cosmology. Default is the default provided by the :class:`cosmo.Cosmology`
-        class. Not required if ``omegam_z`` is passed.
-
-    omegam_z : float, optional
-        A value for the mean matter density at the given redshift ``z``. If not
-        provided, will be calculated using the value of ``cosmo``.
-
-    \*\*model_parameters : unpacked-dictionary
+    \*\*model_parameters :
         These parameters are model-specific. For any model, list the available
         parameters (and their defaults) using ``<model>._defaults``
 
@@ -48,7 +40,7 @@ class CMRelation(Model):
     _defaults = {}
 
     use_cosmo = False
-    def __init__(self, nu, z, growth, M, **model_parameters):
+    def __init__(self, nu=None, z=0.0, growth=None, M=None, **model_parameters):
         # Save instance variables
         self.nu = nu
         self.z = z
