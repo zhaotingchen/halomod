@@ -60,6 +60,7 @@ class CMRelation(Component):
         self.delta_c=delta_c
         self.delta_halo = delta_halo
 
+        #TODO: mean_density0 should be removed, as it is in cosmo
         self.profile = profile
         self.cosmo = cosmo
         super(CMRelation, self).__init__(**model_parameters)
@@ -205,3 +206,12 @@ class Ludlow2016Empirical(CMRelation):
         sig = self.growth.growth_factor(z) * 22.26 * xi**0.292 / (1 + 1.53*xi**0.275 + 3.36 * xi**0.198)
         nu = self.delta_c/sig
         return self._c0(z) * (nu/self._nu_0(z))**(-self._gamma1(z)) * (1 + (nu/self._nu_0(z))**(1./self._beta(z))) **(-self._beta(z)*(self._gamma2(z) - self._gamma1(z)))
+
+class Maccio07(CMRelation):
+    """
+        HI concentration-mass relation based on Maccio et al.(2007). Default value taken from 1611.06235
+        """
+    _defaults = {'c_0': 139, "gamma": 0.13}
+
+    def cm(self,m,z):
+        return self.params['c_0']*(m*10**(-11))**(-0.109)*4/(1+z)**self.params['gamma']
