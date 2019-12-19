@@ -233,3 +233,63 @@ class CrossCorrelations(Framework):
     def corr_cross(self):
         """The tracer auto correlation function"""
         return self.corr_1h_cross + self.corr_2h_cross + 1
+
+
+class OpticalHIContinuous(HODCross):
+    """
+    A cross-correlation model for discrete optical galaxies and a continuous HI distribution throughout the halo.
+
+    In this model, we simply assume some constant (with mass) correlation co-efficient between the occupations.
+    """
+
+    _defaults = {"R_ss": 0.5, "R_cs": 0}
+
+    def R_ss(self, m):
+        return self.params['R_ss']
+
+    def R_cs(self, m):
+        return 0
+
+    def R_sc(self, m):
+        return 0
+
+    def self_pairs(self, m):
+        return 0
+
+
+class OpticalHIDiscrete(HODCross):
+    """
+    A cross-correlation model for discrete optical galaxies and a discrete HI distribution (see derivation_of_1halo_term for details).
+    """
+
+    def R_ss(self, m):
+        return self.self_pairs(m) / (self.hods[0].sigma_satellite(m) * self.hods[1].sigma_satellite(m))
+
+    def R_cs(self, m):
+        return 0
+
+    def R_sc(self, m):
+        return 0
+
+    def self_pairs(self, m):
+        return self.hods[0].satellite_occupation(m)
+
+
+class OpticalOptical(HODCross):
+    """
+    A cross-correlation model for discrete optical galaxies and a discrete HI distribution (see derivation_of_1halo_term for details).
+    """
+
+    _defaults = {"R_ss": 0.0, "R_cs": 0}
+
+    def R_ss(self, m):
+        return self.params['R_ss']
+
+    def R_cs(self, m):
+        return 0
+
+    def R_sc(self, m):
+        return 0
+
+    def self_pairs(self, m):
+        return 0

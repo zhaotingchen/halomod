@@ -211,7 +211,7 @@ class Maccio07(CMRelation):
     """
         HI concentration-mass relation based on Maccio et al.(2007). Default value taken from 1611.06235
         """
-    _defaults = {'c_0': 139, "gamma": 0.13}
+    _defaults = {'c_0': 28.65, "gamma": 1.45}
 
     def cm(self,m,z):
         return self.params['c_0']*(m*10**(-11))**(-0.109)*4/(1+z)**self.params['gamma']

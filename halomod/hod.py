@@ -453,6 +453,171 @@ class Zehavi05_Marked(Zehavi05_WithMax):
         return super(Zehavi05_Marked, self)._satellite_occupation(M) * self._tracer_per_satellite(M)
 
 
+class Zehavi05_tracer(Zehavi05_WithMax):
+    """
+    This class is based on the Zehavi05_WithMax class for a tracer with amplitude logA.
+    The tracer can follow a different HOD than the underlying galaxy counts, which also follow a Zehavi05_WithMax HOD.
+    """
+    _defaults = {"M_min": 11.6222,
+                 "M_1": 12.851,
+                 "logA": 0.0,
+                 "alpha": 1.049,
+                 "M_max": 18.0,
+                 "M_1_counts": 12.851,
+                 "alpha_counts": 1.049,
+                 }
+
+    def unit_conversion(self, cosmo, z):
+        "A factor (potentially with astropy units) to convert the total occupation to a desired unit."
+        A12 = 2.869e-15
+        nu21cm = 1.42e9
+        Const = (3.0 * A12 * const.h * const.c ** 3.0) / (
+                    32.0 * np.pi * (const.m_p + const.m_e) * const.Boltzmann * nu21cm ** 2);
+        Mpcoverh_3 = ((astroconst.kpc.value * 1e3) / (cosmo.H0.value / 100.0)) ** 3
+        hubble = cosmo.H0.value * cosmo.efunc(z) * 1.0e3 / (astroconst.kpc.value * 1e3)
+        temp_conv = Const * ((1.0 + z) ** 2 / hubble)
+        # convert to Mpc^3, solar mass
+        temp_conv = temp_conv / Mpcoverh_3 * astroconst.M_sun.value
+        return temp_conv
+
+    def _central_occupation(self, M):
+        """
+        Number of central galaxies at mass M
+        """
+        n_c = np.zeros_like(M)
+        n_c[np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])] = 1 * 10 ** self.params[
+            'logA']
+
+        return n_c
+
+    def _satellite_occupation(self, M):
+        """
+        Number of satellite galaxies at mass M
+        """
+        return (M / 10 ** self.params["M_1"]) ** self.params["alpha"] * 10 ** self.params['logA']
+
+    def sigma_central(self, m):
+        co = super(Zehavi05_tracer, self)._central_occupation(m)
+        return np.sqrt(self._tracer_per_central(m) * co * (1 - co))
+
+    def _tracer_per_central(self, M):
+        tpc = self._central_occupation(M) / self.nc(M)
+        tpc[np.isnan(tpc)] = 0.0
+
+        return tpc
+
+    def _tracer_per_satellites(self, M):
+        tps = np.zeros_like(M)
+        index = self.ns(M) != 0.0
+        tps[index] = self._satellite_occupation(M[index]) / self.ns(M[index])
+
+        return tps
+
+    def nc(self, M):
+        n_c = np.zeros_like(M)
+        n_c[np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])] = 1
+        return n_c
+
+    def ns(self, M):
+        n_s = np.zeros_like(M)
+        index = np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])
+        n_s[index] = (M[index] / 10 ** self.params["M_1_counts"]) ** self.params["alpha_counts"]
+
+        return n_s
+
+
+class Zehavi05_centrals(Zehavi05):
+    """
+    A version of the Zehavi05 model in which a maximum halo mass for occupancy also exists.
+    """
+    _defaults = {"alpha": 0,  # power-law slope
+                 "M_1": 11,  # mass at which mean occupation is A
+                 "M_min": 11,  # Truncation mass
+                 "M_max": 18,  # Truncation mass
+                 "M_lim": 13
+                 }
+
+    def _central_occupation(self, M):
+        """
+        Number of central galaxies at mass M
+        """
+        n_c = np.zeros_like(M)
+        n_c[np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])] = 1
+
+        return n_c
+
+    def _satellite_occupation(self, M):
+        """
+        Number of satellite galaxies at mass M
+        """
+        n_s = np.zeros_like(M)
+        # index=np.logical_and(M >= 10 ** self.params["M_lim"],M <= 10 ** self.params["M_max"])
+        # n_s[index]=(M[index] / 10 ** self.params["M_1"]) ** self.params["alpha"]
+
+        return n_s
+
+
+class Zehavi05_satellites(Zehavi05):
+    """
+    A version of the Zehavi05 model in which a maximum halo mass for occupancy also exists.
+    """
+    _defaults = {"alpha": 0,  # power-law slope
+                 "M_1": 11,  # mass at which mean occupation is A
+                 "M_min": 11,  # Truncation mass
+                 "M_max": 18,  # Truncation mass
+                 "M_lim": 13
+                 }
+
+    def _central_occupation(self, M):
+        """
+        Number of central galaxies at mass M
+        """
+        n_c = np.zeros_like(M)
+        # n_c[np.logical_and(M >= 10 ** self.params["M_min"],M <= 10 ** self.params["M_max"])] = 1
+
+        return n_c
+
+    def _satellite_occupation(self, M):
+        """
+        Number of satellite galaxies at mass M
+        """
+        n_s = np.zeros_like(M)
+        index = np.logical_and(M >= 10 ** self.params["M_lim"], M <= 10 ** self.params["M_max"])
+        n_s[index] = (M[index] / 10 ** self.params["M_1"]) ** self.params["alpha"]
+
+        return n_s
+
+
+class Zehavi05_blue(Zehavi05):
+    """
+    A version of the Zehavi05 model in which a maximum halo mass for occupancy also exists.
+    """
+    _defaults = {"alpha": 0,  # power-law slope
+                 "M_1": 11,  # mass at which mean occupation is A
+                 "M_min": 11,  # Truncation mass
+                 "M_max": 18,  # Truncation mass
+                 }
+
+    def _central_occupation(self, M):
+        """
+        Number of central galaxies at mass M
+        """
+        n_c = np.zeros_like(M)
+        n_c[np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])] = 1
+
+        return n_c
+
+    def _satellite_occupation(self, M):
+        """
+        Number of satellite galaxies at mass M
+        """
+        n_s = np.zeros_like(M)
+        index = np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])
+        n_s[index] = (M[index] / 10 ** self.params["M_1"]) ** self.params["alpha"]
+
+        return n_s
+
+
 class ContinuousPowerLaw(HODBulk):
     """
     A continuous HOD which is tuned to match the Zehavi05 total occupation except for normalisation.
@@ -500,6 +665,7 @@ class VN2018Continuous(HODBulk):
                  "M_min": 9, # Truncation Mass
                  "M_1": 12.3,  # Characteristic Mass
                  "sigma_A": 0,  # The (constant) standard deviation of the tracer
+                 "beta": 0.35, # The slope within the exp term
                  "M_max": 18   # Truncation mass
                  }
     sharp_cut = False
@@ -508,8 +674,9 @@ class VN2018Continuous(HODBulk):
         alpha = self.params['alpha']
         A = 10 ** self.params['logA']
         M_1 = 10 ** self.params['M_1']
+        beta = self.params['beta']
 
-        out = A * (m / M_1) ** alpha * np.exp(-(M_1 / m) ** 0.35)
+        out = A * (m / M_1) ** alpha * np.exp(-(M_1 / m) ** beta)
         return out
 
     def sigma_satellite(self, m):
@@ -526,3 +693,91 @@ class VN2018Continuous(HODBulk):
         # convert to Mpc^3, solar mass
         temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
         return temp_conv
+
+class Padmanabhan(HODBulk):
+    """
+    A continuous HOD following Padmanabhan & Refregier (1607.01021)
+    """
+    _defaults = {"alpha": 0.09,  # gives HI mass amplitude
+                 "f_Hc": 0.12,  # gives HI mass amplitude, fixed by Yp and Omegab
+                 "beta": -0.58, #slop of mass
+                 "M_min": 9, # Truncation Mass
+                 "M_1": 11,  # Characteristic Mass
+                 "sigma_A": 0,  # The (constant) standard deviation of the tracer
+                 "M_max": 18,   # Truncation mass
+                 "vc0": 36.31 #characteristic virial velocity, in km/s
+                 }
+    sharp_cut = False
+
+    def _satellite_occupation(self, m):
+        alpha = self.params['alpha']
+        f_Hc = self.params['f_Hc']
+        beta = self.params['beta']
+        vc0 = self.params['vc0']
+        M_1 = 10 ** self.params['M_1']
+
+        out = alpha*f_Hc*m*(m/M_1)**beta*np.exp(-(vc0/self.virial_velocity(m))**3)
+        return out
+
+    def sigma_satellite(self, m):
+        return np.ones_like(m) * self.params['sigma_A']
+
+    def unit_conversion(self, cosmo, z):
+        "A factor (potentially with astropy units) to convert the total occupation to a desired unit."
+        A12=2.869e-15
+        nu21cm=1.42e9
+        Const=( 3.0*A12*const.h*const.c**3.0 )/( 32.0*np.pi*(const.m_p+const.m_e)*const.Boltzmann * nu21cm**2);
+        Mpcoverh_3=((astroconst.kpc.value*1e3)/(cosmo.H0.value/100.0) )**3
+        hubble = cosmo.H0.value * cosmo.efunc(z)*1.0e3/(astroconst.kpc.value*1e3)
+        temp_conv=Const * ((1.0+z)**2/hubble)
+        # convert to Mpc^3, solar mass
+        temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
+        return temp_conv
+
+    def _mvir_to_rvir(self, m):
+        """ Return the virial radius corresponding to m"""
+        return (3 * m / (4 * np.pi * self.delta_halo * self.mean_dens)) ** (1. / 3.)
+
+    def _rvir_to_mvir(self, r):
+        """Return the virial mass corresponding to r"""
+        return 4 * np.pi * r ** 3 * self.delta_halo * self.mean_dens / 3
+
+    def _rs_from_m(self, m, c=None):
+        """
+        Return the scale radius for a halo of mass m
+
+        Parameters
+        ----------
+        m : float
+            mass of the halo
+
+        c : float, default None
+            halo_concentration of the halo (if None, use cm_relation to get it).
+        """
+        if c is None:
+            c = self.cm_relation(m)
+        rvir = self._mvir_to_rvir(m)
+        return rvir / c
+
+    def virial_velocity(self,m=None,r=None):
+        """
+        Return the virial velocity for a halo of virial mass `m`.
+
+        Either `m` or `r` must be passed. If both are passed, `m`
+        is preferentially used.
+
+        Parameters
+        ----------
+        m : array_like, optional
+            Masses of halos.
+
+        r : array_like, optional
+            Radii of halos.
+        """
+        if m is None and r is None:
+            raise ValueError("Either m or r must be specified")
+        if m is not None:
+            r = self._mvir_to_rvir(m)
+        else:
+            m = self._rvir_to_mvir(r)
+        return np.sqrt(6.673*1e-11*m/r) #convert to km/s?
