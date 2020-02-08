@@ -781,3 +781,135 @@ class Padmanabhan(HODBulk):
         else:
             m = self._rvir_to_mvir(r)
         return np.sqrt(6.673*1e-11*m/r) #convert to km/s?
+
+class Padmanabhan_withlargecutoff(HODBulk):
+    """
+    A continuous HOD following Padmanabhan & Refregier (1607.01021) including high-mass cut-off
+    """
+    _defaults = {"alpha": 0.09,  # gives HI mass amplitude
+                 "f_Hc": 0.12,  # gives HI mass amplitude, fixed by Yp and Omegab
+                 "beta": -0.58,  #slop of mass
+                 "M_min": 9,  # Truncation Mass
+                 "M_1": 11,  # Characteristic Mass
+                 "sigma_A": 0,  # The (constant) standard deviation of the tracer
+                 "M_max": 18,  # Truncation mass
+                 "vc0": 36.31,  #characteristic virial velocity, in km/s
+                 "vc1": 24547  # characteristic virial velocity, in km/s
+                 }
+    sharp_cut = False
+
+    def _satellite_occupation(self, m):
+        alpha = self.params['alpha']
+        f_Hc = self.params['f_Hc']
+        beta = self.params['beta']
+        vc0 = self.params['vc0']
+        vc1 = self.params['vc1']
+        M_1 = 10 ** self.params['M_1']
+
+        out = alpha*f_Hc*m*(m/M_1)**beta*np.exp(-(vc0/self.virial_velocity(m))**3)*np.exp(-(self.virial_velocity(m)/vc1)**3)
+        return out
+
+    def sigma_satellite(self, m):
+        return np.ones_like(m) * self.params['sigma_A']
+
+    def unit_conversion(self, cosmo, z):
+        "A factor (potentially with astropy units) to convert the total occupation to a desired unit."
+        A12=2.869e-15
+        nu21cm=1.42e9
+        Const=( 3.0*A12*const.h*const.c**3.0 )/( 32.0*np.pi*(const.m_p+const.m_e)*const.Boltzmann * nu21cm**2);
+        Mpcoverh_3=((astroconst.kpc.value*1e3)/(cosmo.H0.value/100.0) )**3
+        hubble = cosmo.H0.value * cosmo.efunc(z)*1.0e3/(astroconst.kpc.value*1e3)
+        temp_conv=Const * ((1.0+z)**2/hubble)
+        # convert to Mpc^3, solar mass
+        temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
+        return temp_conv
+
+    def _mvir_to_rvir(self, m):
+        """ Return the virial radius corresponding to m"""
+        return (3 * m / (4 * np.pi * self.delta_halo * self.mean_dens)) ** (1. / 3.)
+
+    def _rvir_to_mvir(self, r):
+        """Return the virial mass corresponding to r"""
+        return 4 * np.pi * r ** 3 * self.delta_halo * self.mean_dens / 3
+
+    def _rs_from_m(self, m, c=None):
+        """
+        Return the scale radius for a halo of mass m
+
+        Parameters
+        ----------
+        m : float
+            mass of the halo
+
+        c : float, default None
+            halo_concentration of the halo (if None, use cm_relation to get it).
+        """
+        if c is None:
+            c = self.cm_relation(m)
+        rvir = self._mvir_to_rvir(m)
+        return rvir / c
+
+    def virial_velocity(self,m=None,r=None):
+        """
+        Return the virial velocity for a halo of virial mass `m`.
+
+        Either `m` or `r` must be passed. If both are passed, `m`
+        is preferentially used.
+
+        Parameters
+        ----------
+        m : array_like, optional
+            Masses of halos.
+
+        r : array_like, optional
+            Radii of halos.
+        """
+        if m is None and r is None:
+            raise ValueError("Either m or r must be specified")
+        if m is not None:
+            r = self._mvir_to_rvir(m)
+        else:
+            m = self._rvir_to_mvir(r)
+        return np.sqrt(6.673*1e-11*m/r) #convert to km/s?
+
+class Spinelli19Continueous(HODBulk):
+    """
+    A continuous HOD following Spinelli et al (1909.02242) eq 2
+    """
+    _defaults = {"a1": 0.42,  # gives HI mass amplitude of the power law
+                 "a2": 0.00087,  # gives HI mass amplitude of the power law
+                 "alpha": -0.000035,  # slop of exponential break
+                 "beta": -0.7,  #slop of mass
+                 "M_min": 9,  # Truncation Mass
+                 "M_break": 12.1,  # Characteristic Mass
+                 "M_1": 11.4,  # mass of exponential cutoff
+                 "sigma_A": 0,  # The (constant) standard deviation of the tracer
+                 "M_max": 18,  # Truncation mass
+                 }
+    sharp_cut = False
+
+    def _satellite_occupation(self, m):
+        alpha = self.params['alpha']
+        beta = self.params['beta']
+        M_1 = 10 ** self.params['M_1']
+        a1 = self.params['a1']
+        a2 = self.params['a2']
+        M_break = 10 ** self.params['M_break']
+
+        out = m*(a1*(m/1e10)**beta*np.exp(-(m/M_break)**alpha)+a2)*np.exp(-(M_1/m)**0.5)
+        return out
+
+    def sigma_satellite(self, m):
+        return np.ones_like(m) * self.params['sigma_A']
+
+    def unit_conversion(self, cosmo, z):
+        "A factor (potentially with astropy units) to convert the total occupation to a desired unit."
+        A12=2.869e-15
+        nu21cm=1.42e9
+        Const=( 3.0*A12*const.h*const.c**3.0 )/( 32.0*np.pi*(const.m_p+const.m_e)*const.Boltzmann * nu21cm**2);
+        Mpcoverh_3=((astroconst.kpc.value*1e3)/(cosmo.H0.value/100.0) )**3
+        hubble = cosmo.H0.value * cosmo.efunc(z)*1.0e3/(astroconst.kpc.value*1e3)
+        temp_conv=Const * ((1.0+z)**2/hubble)
+        # convert to Mpc^3, solar mass
+        temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
+        return temp_conv
