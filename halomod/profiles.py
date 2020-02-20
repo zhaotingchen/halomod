@@ -6,13 +6,18 @@ from scipy.interpolate import InterpolatedUnivariateSpline as spline
 from scipy.interpolate import RectBivariateSpline
 import mpmath
 from hmf._framework import Component
-from scipy.special import gammainc, gamma
+from scipy.special import gammainc, gamma, gammaincc
 import os
 import warnings
-from scipy.special import sici
+from scipy.special import sici, expi
+from mpmath import gammainc as complexgammainc
+from mpmath import meijerg, ber, bei
 
 def ginc(a,x):
     return gamma(a) * gammainc(a,x)
+
+def meijerg_func(m,x):
+    return meijerg([[],[]],[[0.5,m/2-1,m/2-0.5],[0]],x)
 
 class Profile(Component):
     """
@@ -479,9 +484,9 @@ class ProfileInf(Profile):
 
         rho = self._f(x) * self.rho_s(c, r_s, norm)
 
-        return self._make_scalar(rho)
+        return self._reduce(rho)
 
-    def u(self, k, m, norm=None, c=None, coord="k"):
+    def u(self, k, m, norm="m", c=None, coord="k"):
         """
         The fourier-transform of the density halo_profile
 
@@ -513,7 +518,7 @@ class ProfileInf(Profile):
         elif norm != "m":
             raise ValueError(str(norm) + "is not a valid value for norm")
 
-        return self._make_scalar(u)
+        return self._reduce(u)
 
     def _p(self, K):
         """
@@ -592,7 +597,7 @@ class ProfileInf(Profile):
                 raise ValueError("norm must be None or 'm'")
         else:
             raise AttributeError("this halo_profile has no self-convolution defined.")
-        return self._make_scalar(lam)
+        return self._reduce(lam)
 
 class Exponential(Profile):
     def _f(self, x):
@@ -611,6 +616,64 @@ class Exponential(Profile):
 class ExponentialInf(Exponential, ProfileInf):
     def _p(self, K):
         return 2 * (1 + K ** 2) ** (-2)
+
+    def _h(self, c):
+        return 2
+
+    def _rho_s(self, c, r_s=None, norm=None):
+        """
+        The amplitude factor of the halo_profile
+
+        Parameters
+        ----------
+        c : float or array of floats
+            The halo_concentration parameter
+
+        norm : str or None, {None,"m","rho"}
+            Normalisation for the amplitude. Can either be None (in which case
+            the output is a density), "m" (in which case the output is inverse
+            volume) or "rho" in which case the output is dimensionless.
+
+        r_s : float or array of floats
+            The scale radius. This is only required if ``norm`` is "m".
+        """
+        if norm is None:
+            rho = c ** 3 * self.delta_halo * self.mean_dens / (3 * self._h(c))
+        elif norm is "m":
+            rho = 1.0 / (4 * np.pi * r_s ** 3 * self._h(c))
+        elif norm is "rho":
+            rho = c ** 3 * self.delta_halo / (3 * self._h(c))
+
+        return self._reduce(rho)
+
+    def rho(self, r, m, norm=None, c=None, coord="r"):
+        """
+        The density at radius r of a halo of mass m.
+
+        Parameters
+        ----------
+        r : float or array of floats
+            The radial location(s). The units vary according to :attr:`coord`
+
+        m : float or array of floats
+            The mass(es) of the halo(s)
+
+        norm : str, {``None``,``m``,``rho``}
+            Normalisation of the density.
+
+        c : float or array of floats, default ``None``
+            Concentration(s) of the halo(s). Must be same length as :attr:`m`.
+
+        coord : str, {``r``,``x``,``s``}
+            What the radial coordinate represents. ``r`` represents physical
+            co-ordinates [units Mpc/h]. ``x`` is in units of the scale radius
+            (x(r_vir) = c), and ``s`` is in units of the virial radius (s(r_vir) = 1).
+        """
+        c, r_s, x = self._get_r_variables(r, m, c, coord)
+        rho = self._f(x) * self._rho_s(c, r_s, norm)
+        #rho[x > c] = 0.0
+
+        return self._reduce(rho)
 
 
 
@@ -865,3 +928,199 @@ class CoredNFW(Profile):
                                -12 * (np.cos(0.75 * k) * si2 - np.sin(0.75 * k) * ci2))
 
         return antideriv(K, c) - antideriv(K, 0)
+
+class Powerlaw_largecutoff(Profile):
+    """
+        A simple power law assuming f(x)=1/x**b * exp[-ax]
+    """
+    _defaults = {"a": 0.1, "b": 2.0}
+    def _f(self, x):
+        return 1. / (x ** self.params['b']) * np.exp(-self.params['a'] * x)
+    def _h(self, c):
+        a = self.params['a']
+        b = self.params['b']
+        return a**(b-3)*gamma(3-b)*(1-gammaincc(3-b,a*c))
+    def _p(self, K, c):
+        a = self.params['a']
+        b = self.params['b']
+        if b==2.0 :
+            result = 1.0j*(expi(-c*(a+K*1.0j))-expi(-a*c+c*K*1.0j)-np.log(-a-K*1.0j)+np.log(-a+K*1.0j))
+            return result.real/2/K
+        else:
+            func1 = 1.0 / 2.0 / K / (a**2+K**2)**2 * (1.0j)
+            func2 = (K-a*1.0j)**2*(a-K*1.0j)**b*(gamma(2-b)-complexgammainc(2-b,c*(a-K*1.0j)))
+            func3 = (a-K**1.0j)**2*(a+K**1.0j)**b*(gamma(2-b)-complexgammainc(2-b,c*(1+K*1.0j)))
+            return (func1*(func2+func3)).real
+
+
+
+
+class PowerlawInf_largecutoff(ProfileInf):
+    """
+    A simple power law assuming f(x)=1/x**b * exp[-ax]
+    """
+    _defaults = {"a": 0.1, "b": 2.0}
+    def _f(self, x):
+        return 1. / (x**self.params['b']) * np.exp(-self.params['a']*x)
+
+    def _h(self, c):
+        return gamma(3-self.params['b']) * self.params['a']**(self.params['b']-3)
+
+    def _rho_s(self, c, r_s=None, norm=None):
+        """
+        The amplitude factor of the halo_profile
+
+        Parameters
+        ----------
+        c : float or array of floats
+            The halo_concentration parameter
+
+        norm : str or None, {None,"m","rho"}
+            Normalisation for the amplitude. Can either be None (in which case
+            the output is a density), "m" (in which case the output is inverse
+            volume) or "rho" in which case the output is dimensionless.
+
+        r_s : float or array of floats
+            The scale radius. This is only required if ``norm`` is "m".
+        """
+        if norm is None:
+            rho = c ** 3 * self.delta_halo * self.mean_dens / (3 * self._h(c))
+        elif norm is "m":
+            rho = 1.0 / (4 * np.pi * r_s ** 3 * self._h(c))
+        elif norm is "rho":
+            rho = c ** 3 * self.delta_halo / (3 * self._h(c))
+
+        return self._reduce(rho)
+
+    def rho(self, r, m, norm=None, c=None, coord="r"):
+        """
+        The density at radius r of a halo of mass m.
+
+        Parameters
+        ----------
+        r : float or array of floats
+            The radial location(s). The units vary according to :attr:`coord`
+
+        m : float or array of floats
+            The mass(es) of the halo(s)
+
+        norm : str, {``None``,``m``,``rho``}
+            Normalisation of the density.
+
+        c : float or array of floats, default ``None``
+            Concentration(s) of the halo(s). Must be same length as :attr:`m`.
+
+        coord : str, {``r``,``x``,``s``}
+            What the radial coordinate represents. ``r`` represents physical
+            co-ordinates [units Mpc/h]. ``x`` is in units of the scale radius
+            (x(r_vir) = c), and ``s`` is in units of the virial radius (s(r_vir) = 1).
+        """
+        c, r_s, x = self._get_r_variables(r, m, c, coord)
+        rho = self._f(x) * self._rho_s(c, r_s, norm)
+        #rho[x > c] = 0.0
+
+        return self._reduce(rho)
+
+    def _p(self, K, c=None):
+        b = self.params['b']
+        a = self.params['a']
+        if b==2:
+            return np.arctan(K/a)/K
+        else:
+            return -1 /(a**2+K**2) * (a**b*(1+K**2/a**2)**(b/2)*gamma(2-b)*np.sin((b-2)*np.arctan(K/a)))
+
+class Powerlaw_smallcutoff(Profile):
+    """
+        A simple power law assuming f(x)=1/x**b * exp[-a/x]
+    """
+    _defaults = {"a": 0.1, "b": 2.0}
+    def _f(self, x):
+        return 1. / (x ** self.params['b']) * np.exp(-self.params['a'] / x)
+    def _h(self, c):
+        a = self.params['a']
+        b = self.params['b']
+        return a**(3-b)*gamma(b-3)*(gammaincc(b-3,a/c))
+
+class PowerlawInf_smallcutoff(ProfileInf):
+    """
+    A simple power law assuming f(x)=1/x**b * exp[-a/x]
+    """
+    _defaults = {"a": 0.1, "b": 4}
+    def _f(self, x):
+        return 1. / (x**self.params['b']) * np.exp(-self.params['a']/x)
+
+    def _h(self, c):
+        a = self.params['a']
+        b = self.params['b']
+        return a ** (3 - b) * gamma(b - 3)
+
+    def _rho_s(self, c, r_s=None, norm=None):
+        """
+        The amplitude factor of the halo_profile
+
+        Parameters
+        ----------
+        c : float or array of floats
+            The halo_concentration parameter
+
+        norm : str or None, {None,"m","rho"}
+            Normalisation for the amplitude. Can either be None (in which case
+            the output is a density), "m" (in which case the output is inverse
+            volume) or "rho" in which case the output is dimensionless.
+
+        r_s : float or array of floats
+            The scale radius. This is only required if ``norm`` is "m".
+        """
+        if norm is None:
+            rho = c ** 3 * self.delta_halo * self.mean_dens / (3 * self._h(c))
+        elif norm is "m":
+            rho = 1.0 / (4 * np.pi * r_s ** 3 * self._h(c))
+        elif norm is "rho":
+            rho = c ** 3 * self.delta_halo / (3 * self._h(c))
+
+        return self._reduce(rho)
+
+    def rho(self, r, m, norm=None, c=None, coord="r"):
+        """
+        The density at radius r of a halo of mass m.
+
+        Parameters
+        ----------
+        r : float or array of floats
+            The radial location(s). The units vary according to :attr:`coord`
+
+        m : float or array of floats
+            The mass(es) of the halo(s)
+
+        norm : str, {``None``,``m``,``rho``}
+            Normalisation of the density.
+
+        c : float or array of floats, default ``None``
+            Concentration(s) of the halo(s). Must be same length as :attr:`m`.
+
+        coord : str, {``r``,``x``,``s``}
+            What the radial coordinate represents. ``r`` represents physical
+            co-ordinates [units Mpc/h]. ``x`` is in units of the scale radius
+            (x(r_vir) = c), and ``s`` is in units of the virial radius (s(r_vir) = 1).
+        """
+        c, r_s, x = self._get_r_variables(r, m, c, coord)
+        rho = self._f(x) * self._rho_s(c, r_s, norm)
+        #rho[x > c] = 0.0
+
+        return self._reduce(rho)
+
+    def _p(self, K, c=None):
+        b = self.params['b']
+        a = self.params['a']
+        if b%1==0:
+            meijerg_array = np.frompyfunc(meijerg_func,2,1)
+            return 2**(b-3)/a**(b-2)*meijerg_array(b,a**2*K**2/16)/K
+        else:
+            ber_array=np.frompyfunc(ber,2,1)
+            bei_array=np.frompyfunc(bei,2,1)
+            func1 = -np.pi*K**b/np.sin(np.pi*b)*(a*K)**(1-b/2)
+            func2 = np.cos(3*np.pi*b/4)*ber_array(2-b,2*np.sqrt(a*K))
+            func3 = -np.cos(np.pi*b/4)*ber_array(b-2,2*np.sqrt(a*K))
+            func4 = -np.sin(np.pi*b/4)*bei_array(b-2,2*np.sqrt(a*K))
+            func5 = -np.sin(3*np.pi*b/4)*bei_array(2-b,2*np.sqrt(a*K))
+            return func1*(func2+func3+func4+func5)/K**3
