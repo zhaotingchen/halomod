@@ -957,14 +957,14 @@ class Powerlaw_largecutoff(Profile):
 
 class PowerlawInf_largecutoff(ProfileInf):
     """
-    A simple power law assuming f(x)=1/x**b * exp[-ax]
+    A simple power law assuming f(x)=1/x**b * exp[-ax**eta]
     """
-    _defaults = {"a": 0.1, "b": 2.0}
+    _defaults = {"a": 0.049, "b": 2.248, "eta":1.0}
     def _f(self, x):
-        return 1. / (x**self.params['b']) * np.exp(-self.params['a']*x)
+        return 1. / (x**self.params['b']) * np.exp(-self.params['a']*x**self.params['eta'])
 
     def _h(self, c):
-        return gamma(3-self.params['b']) * self.params['a']**(self.params['b']-3)
+        return gamma((3-self.params['b'])/self.params['eta']) * self.params['a']**((self.params['b']-3)/self.params['eta'])/self.params['eta']
 
     def _rho_s(self, c, r_s=None, norm=None):
         """
@@ -1024,10 +1024,11 @@ class PowerlawInf_largecutoff(ProfileInf):
     def _p(self, K, c=None):
         b = self.params['b']
         a = self.params['a']
+        eta = self.params['eta']
         if b==2:
             return np.arctan(K/a)/K
         else:
-            return -1 /(a**2+K**2) * (a**b*(1+K**2/a**2)**(b/2)*gamma(2-b)*np.sin((b-2)*np.arctan(K/a)))
+            return -1 / K * ((a**2+K**2)**(b/2-1)*gamma(2-b)*np.sin((b-2)*np.arctan(K/a)))
 
 class Powerlaw_smallcutoff(Profile):
     """

@@ -494,7 +494,10 @@ class Zehavi05_tracer(Zehavi05_WithMax):
         """
         Number of satellite galaxies at mass M
         """
-        return (M / 10 ** self.params["M_1"]) ** self.params["alpha"] * 10 ** self.params['logA']
+        n_s = np.zeros_like(M)
+        n_s[np.logical_and(M >= 10 ** self.params["M_min"], M <= 10 ** self.params["M_max"])] = 1 * 10 ** self.params[
+            'logA']
+        return (M / 10 ** self.params["M_1"]) ** self.params["alpha"] * n_s
 
     def sigma_central(self, m):
         co = super(Zehavi05_tracer, self)._central_occupation(m)
@@ -933,7 +936,14 @@ class Spinelli19(HODPoisson):
                  "M_0": 8.31, # Amplitude of satellite HOD
                  "M_break_sat": 11.4, # characteristic mass for satellite HOD
                  "alpha_sat": 0.84, # slop of exponential cut-off for satellite
-                 "beta_sat": 1.10 # slop of mass for satellite
+                 "beta_sat": 1.10, # slop of mass for satellite
+                 "M_1_counts": 12.851,
+                 "alpha_counts": 1.049,
+                 "M_min_counts": 11,  # Truncation Mass
+                 "M_max_counts": 15,  # Truncation Mass
+                 "a": 0.049,
+                 "b": 2.248,
+                 "eta": 1.0
                  }
     sharp_cut = True
     central_condition_inherent = True
@@ -955,8 +965,10 @@ class Spinelli19(HODPoisson):
         beta = self.params['beta_sat']
         amp = 10 ** self.params['M_0']
         m1 = 10 ** self.params['M_break_sat']
+        array = np.zeros_like(m)
+        array[m >= 10 ** 11] = 1
 
-        return amp * (m/m1) ** beta * np.exp(-(m1/m)**alpha)
+        return amp * (m/m1) ** beta * np.exp(-(m1/m)**alpha) * array
         #return 10**8
 
     def unit_conversion(self, cosmo, z):
@@ -970,3 +982,80 @@ class Spinelli19(HODPoisson):
         # convert to Mpc^3, solar mass
         temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
         return temp_conv
+
+    def cn(self, M):
+        n_c = np.zeros_like(M)
+        n_c[np.logical_and(M >= 10 ** self.params["M_min_counts"], M <= 10 ** self.params["M_max_counts"])] = 1
+        return n_c
+
+    def sn(self, M):
+        n_s = np.zeros_like(M)
+        index = np.logical_and(M >= 10 ** self.params["M_min_counts"], M <= 10 ** self.params["M_max_counts"])
+        n_s[index] = (M[index] / 10 ** self.params["M_1_counts"]) ** self.params["alpha_counts"]
+
+        return n_s
+
+class Zehavi05_NewTracer(HODPoisson):
+    """
+    Similar to the model of Zehavi (2005), with a mass-dependent central component
+
+    Parameters
+    ----------
+    M_min : float, default = 11.6222
+        Minimum mass of halo that supports a central galaxy
+
+    M_1 : float, default = 12.851
+        Mass of a halo which on average contains 1 satellite
+
+    alpha : float, default = 1.049
+        Index of power law for satellite galaxies
+    """
+    _defaults = {"M_min":9.81,
+                 "M_0_cen":7.78,
+                 "M_1_cen":10.00,
+                 "alpha_cen":0.7,
+                 "M_min_sat":11.00,
+                 "M_0_sat": 7.30,
+                 "M_1_sat": 11.00,
+                 "alpha_sat": 1.40,
+                 "a": 0.049,
+                 "b": 2.248,
+                 "eta": 1.0
+                 }
+    sharp_cut = True
+    central_condition_inherent = True
+
+    def _central_occupation(self, M):
+        """
+        Number of central galaxies at mass M
+        """
+        n_c = np.zeros_like(M)
+        n_c[M >= 10 ** self.params["M_min"]] = 1
+        M_0 = 10**self.params["M_0_cen"]
+        M_1 = 10**self.params["M_1_cen"]
+        alpha = self.params["alpha_cen"]
+        return M_0 * (M/M_1)**alpha * n_c
+
+    def _satellite_occupation(self, M):
+        """
+        Number of satellite galaxies at mass M
+        """
+        s_c = np.zeros_like(M)
+        s_c[M >= 10 ** self.params["M_min_sat"]] = 1
+        M_0 = 10 ** self.params["M_0_sat"]
+        M_1 = 10 ** self.params["M_1_sat"]
+        alpha = self.params["alpha_sat"]
+        return M_0 * (M / M_1) ** alpha * s_c
+
+    def unit_conversion(self, cosmo, z):
+        "A factor (potentially with astropy units) to convert the total occupation to a desired unit."
+        A12=2.869e-15
+        nu21cm=1.42e9
+        Const=( 3.0*A12*const.h*const.c**3.0 )/( 32.0*np.pi*(const.m_p+const.m_e)*const.Boltzmann * nu21cm**2);
+        Mpcoverh_3=((astroconst.kpc.value*1e3)/(cosmo.H0.value/100.0) )**3
+        hubble = cosmo.H0.value * cosmo.efunc(z)*1.0e3/(astroconst.kpc.value*1e3)
+        temp_conv=Const * ((1.0+z)**2/hubble)
+        # convert to Mpc^3, solar mass
+        temp_conv=temp_conv/Mpcoverh_3 * astroconst.M_sun.value
+        return temp_conv
+
